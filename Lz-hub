@@ -1,0 +1,305 @@
+-- LZ SCRIPTS - SIMPLE AIMBOT
+-- Compact aimbot with team detection and smooth animations
+
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local Camera = workspace.CurrentCamera
+
+local LocalPlayer = Players.LocalPlayer
+local Mouse = LocalPlayer:GetMouse()
+
+-- Script Variables
+local AimbotEnabled = false
+local TargetPart = "Head" -- Head, HumanoidRootPart, etc.
+local AimSmoothness = 0.1
+local MaxDistance = 1000
+
+local AimbotConnection
+local CurrentTarget = nil
+
+-- Create GUI
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "LzAimbot"
+ScreenGui.Parent = game.CoreGui
+ScreenGui.ResetOnSpawn = false
+
+-- Main Frame
+local MainFrame = Instance.new("Frame")
+MainFrame.Size = UDim2.new(0, 200, 0, 80)
+MainFrame.Position = UDim2.new(0.5, -100, 0, 20)
+MainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+MainFrame.BorderSizePixel = 0
+MainFrame.Active = true
+MainFrame.Draggable = true
+MainFrame.Parent = ScreenGui
+
+local MainCorner = Instance.new("UICorner")
+MainCorner.CornerRadius = UDim.new(0, 8)
+MainCorner.Parent = MainFrame
+
+-- Header
+local Header = Instance.new("Frame")
+Header.Size = UDim2.new(1, 0, 0, 25)
+Header.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+Header.BorderSizePixel = 0
+Header.Parent = MainFrame
+
+local HeaderCorner = Instance.new("UICorner")
+HeaderCorner.CornerRadius = UDim.new(0, 8)
+HeaderCorner.Parent = Header
+
+-- Title
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(0.7, 0, 1, 0)
+Title.Position = UDim2.new(0, 8, 0, 0)
+Title.BackgroundTransparency = 1
+Title.Text = "Lz Scripts"
+Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+Title.TextSize = 12
+Title.Font = Enum.Font.GothamBold
+Title.TextXAlignment = Enum.TextXAlignment.Left
+Title.Parent = Header
+
+-- Minimize Button
+local MinimizeButton = Instance.new("TextButton")
+MinimizeButton.Size = UDim2.new(0, 20, 0, 20)
+MinimizeButton.Position = UDim2.new(1, -25, 0, 2.5)
+MinimizeButton.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+MinimizeButton.BorderSizePixel = 0
+MinimizeButton.Text = "-"
+MinimizeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+MinimizeButton.TextSize = 14
+MinimizeButton.Font = Enum.Font.GothamBold
+MinimizeButton.Parent = Header
+
+local MinCorner = Instance.new("UICorner")
+MinCorner.CornerRadius = UDim.new(0, 4)
+MinCorner.Parent = MinimizeButton
+
+-- Content Frame
+local ContentFrame = Instance.new("Frame")
+ContentFrame.Size = UDim2.new(1, -16, 1, -35)
+ContentFrame.Position = UDim2.new(0, 8, 0, 30)
+ContentFrame.BackgroundTransparency = 1
+ContentFrame.Parent = MainFrame
+
+-- Aimbot Toggle Button
+local AimbotButton = Instance.new("TextButton")
+AimbotButton.Size = UDim2.new(1, 0, 0, 35)
+AimbotButton.Position = UDim2.new(0, 0, 0, 5)
+AimbotButton.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+AimbotButton.BorderSizePixel = 0
+AimbotButton.Text = "Aimbot: OFF"
+AimbotButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+AimbotButton.TextSize = 12
+AimbotButton.Font = Enum.Font.Gotham
+AimbotButton.Parent = ContentFrame
+
+local AimbotCorner = Instance.new("UICorner")
+AimbotCorner.CornerRadius = UDim.new(0, 6)
+AimbotCorner.Parent = AimbotButton
+
+-- Status Indicator
+local StatusDot = Instance.new("Frame")
+StatusDot.Size = UDim2.new(0, 8, 0, 8)
+StatusDot.Position = UDim2.new(1, -15, 0.5, -4)
+StatusDot.BackgroundColor3 = Color3.fromRGB(220, 20, 20)
+StatusDot.BorderSizePixel = 0
+StatusDot.Parent = AimbotButton
+
+local DotCorner = Instance.new("UICorner")
+DotCorner.CornerRadius = UDim.new(0, 4)
+DotCorner.Parent = StatusDot
+
+-- Functions
+local function GetClosestPlayer()
+    local closestPlayer = nil
+    local shortestDistance = MaxDistance
+    local localTeam = LocalPlayer.Team
+    
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild(TargetPart) then
+            -- Team check - only target opposite teams
+            if localTeam and player.Team and player.Team == localTeam then
+                continue -- Skip teammates
+            end
+            
+            local targetPart = player.Character[TargetPart]
+            local distance = (Camera.CFrame.Position - targetPart.Position).Magnitude
+            
+            if distance < shortestDistance then
+                -- Check if target is visible (basic raycast)
+                local raycastParams = RaycastParams.new()
+                raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
+                raycastParams.FilterDescendantsInstances = {LocalPlayer.Character}
+                
+                local raycastResult = workspace:Raycast(Camera.CFrame.Position, (targetPart.Position - Camera.CFrame.Position).Unit * distance, raycastParams)
+                
+                if not raycastResult or raycastResult.Instance:IsDescendantOf(player.Character) then
+                    shortestDistance = distance
+                    closestPlayer = player
+                end
+            end
+        end
+    end
+    
+    return closestPlayer
+end
+
+local function AimAtTarget(target)
+    if not target or not target.Character or not target.Character:FindFirstChild(TargetPart) then
+        return
+    end
+    
+    local targetPart = target.Character[TargetPart]
+    local targetPosition = targetPart.Position
+    
+    -- Smooth aiming
+    local currentCFrame = Camera.CFrame
+    local targetCFrame = CFrame.lookAt(Camera.CFrame.Position, targetPosition)
+    
+    local smoothedCFrame = currentCFrame:Lerp(targetCFrame, AimSmoothness)
+    Camera.CFrame = smoothedCFrame
+end
+
+local function StartAimbot()
+    AimbotConnection = RunService.Heartbeat:Connect(function()
+        if AimbotEnabled then
+            CurrentTarget = GetClosestPlayer()
+            if CurrentTarget then
+                AimAtTarget(CurrentTarget)
+            end
+        end
+    end)
+end
+
+local function StopAimbot()
+    if AimbotConnection then
+        AimbotConnection:Disconnect()
+        AimbotConnection = nil
+    end
+    CurrentTarget = nil
+end
+
+local function ToggleAimbot()
+    AimbotEnabled = not AimbotEnabled
+    
+    if AimbotEnabled then
+        AimbotButton.Text = "Aimbot: ON"
+        AimbotButton.BackgroundColor3 = Color3.fromRGB(50, 150, 50)
+        StatusDot.BackgroundColor3 = Color3.fromRGB(50, 255, 50)
+        StartAimbot()
+    else
+        AimbotButton.Text = "Aimbot: OFF"
+        AimbotButton.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+        StatusDot.BackgroundColor3 = Color3.fromRGB(220, 20, 20)
+        StopAimbot()
+    end
+end
+
+-- Minimize Animation
+local isMinimized = false
+local function ToggleMinimize()
+    isMinimized = not isMinimized
+    
+    if isMinimized then
+        -- Minimize animation
+        local minimizeInfo = TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+        local minimizeTween = TweenService:Create(MainFrame, minimizeInfo, {
+            Size = UDim2.new(0, 200, 0, 25)
+        })
+        
+        local contentTween = TweenService:Create(ContentFrame, minimizeInfo, {
+            Size = UDim2.new(1, -16, 0, 0)
+        })
+        
+        minimizeTween:Play()
+        contentTween:Play()
+        
+        MinimizeButton.Text = "+"
+    else
+        -- Expand animation
+        local expandInfo = TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+        local expandTween = TweenService:Create(MainFrame, expandInfo, {
+            Size = UDim2.new(0, 200, 0, 80)
+        })
+        
+        local contentTween = TweenService:Create(ContentFrame, expandInfo, {
+            Size = UDim2.new(1, -16, 1, -35)
+        })
+        
+        expandTween:Play()
+        contentTween:Play()
+        
+        MinimizeButton.Text = "-"
+    end
+end
+
+-- Close Animation (when script is destroyed)
+local function CloseWithAnimation()
+    local closeInfo = TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.In)
+    local closeTween = TweenService:Create(MainFrame, closeInfo, {
+        Size = UDim2.new(0, 0, 0, 0),
+        Position = UDim2.new(0.5, 0, 0, 60)
+    })
+    
+    local fadeTween = TweenService:Create(MainFrame, closeInfo, {
+        BackgroundTransparency = 1
+    })
+    
+    closeTween:Play()
+    fadeTween:Play()
+    
+    closeTween.Completed:Connect(function()
+        ScreenGui:Destroy()
+    end)
+end
+
+-- Button Connections
+AimbotButton.MouseButton1Click:Connect(ToggleAimbot)
+MinimizeButton.MouseButton1Click:Connect(ToggleMinimize)
+
+-- Key Bindings
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    
+    -- Toggle aimbot with Right Click
+    if input.UserInputType == Enum.UserInputType.MouseButton2 then
+        ToggleAimbot()
+    end
+    
+    -- Toggle GUI with Insert
+    if input.KeyCode == Enum.KeyCode.Insert then
+        MainFrame.Visible = not MainFrame.Visible
+    end
+    
+    -- Close with Delete (with animation)
+    if input.KeyCode == Enum.KeyCode.Delete then
+        StopAimbot()
+        CloseWithAnimation()
+    end
+end)
+
+-- Cleanup on character death
+LocalPlayer.CharacterAdded:Connect(function()
+    wait(1)
+    if AimbotEnabled then
+        StopAimbot()
+        StartAimbot()
+    end
+end)
+
+-- Cleanup when leaving
+Players.PlayerRemoving:Connect(function(player)
+    if player == LocalPlayer then
+        StopAimbot()
+    end
+end)
+
+print("🎯 Lz Scripts Aimbot Loaded!")
+print("🔧 Right Click to toggle aimbot")
+print("📝 Insert to toggle GUI")
+print("❌ Delete to close with animation")
+print("⚡ Only targets opposite teams")
